@@ -1,4 +1,4 @@
-# Configuration for Stage 1 Training on S.I.S Dataset (Kaggle 1x P100 GPU Optimized)
+# Configuration for Stage 1 Training on S.I.S Dataset (Kaggle 1x T4 GPU Optimized)
 
 # Kaggle Dataset Paths
 report_path: "/kaggle/input/datasets/duongb/cthsis/report_cleaned.xlsx"
@@ -27,9 +27,9 @@ image_size: 384
 patch_size: 16
 temporal_patch_size: 4
 
-# Training parameters for 1x GPU (P100 / T4)
-batch_size: 4                      # Single-GPU batch size
-gradient_accumulation_steps: 4     # Effective batch size = 4 x 4 = 16
+# Training parameters for 1x GPU T4
+batch_size: 2                      # Single GPU batch size (T4 16GB VRAM)
+gradient_accumulation_steps: 8     # Effective batch size = 2 x 8 = 16
 use_amp: true                      # Automatic Mixed Precision (FP16)
 epochs: 20
 lr: 0.0001

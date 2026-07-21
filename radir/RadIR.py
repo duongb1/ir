@@ -684,15 +684,24 @@ class RADIR(nn.Module):
             
             if self.use_image2image_loss:
                 image_to_image = einsum('m t d, n i d -> m n t i', image_latents, image_latents) * temp   # 1 1 B B
-                image_to_image = image_to_image.squeeze()
+                image_to_image = image_to_image.squeeze(0).squeeze(0)
+                if image_to_image.dim() == 1:
+                    image_to_image = image_to_image.unsqueeze(0)
                 
             # calculate loss
 
-            text_to_image = rearrange(text_to_image, 'm n ... -> (m n) ...').squeeze()    # 1 B B -> B B
-            image_to_text = rearrange(image_to_text, 'm n ... -> (m n) ...').squeeze()    # 1 B B -> B B
+            text_to_image = rearrange(text_to_image, 'm n ... -> (m n) ...').squeeze(0)    # 1 B B -> B B
+            image_to_text = rearrange(image_to_text, 'm n ... -> (m n) ...').squeeze(0)    # 1 B B -> B B
+
+            if text_to_image.dim() == 1:
+                text_to_image = text_to_image.unsqueeze(0)
+            if image_to_text.dim() == 1:
+                image_to_text = image_to_text.unsqueeze(0)
             
             if gt_similarity_matrix is None:
                 gt_similarity_matrix = torch.eye(text_to_image.shape[-1], device=text_to_image.device)
+            elif gt_similarity_matrix.dim() == 1:
+                gt_similarity_matrix = gt_similarity_matrix.unsqueeze(0)
 
             if not (self.use_uncon_infoNCE_loss > 0 or self.use_uncon_triplet_loss > 0 or self.use_image2image_loss > 0):
                 raise ValueError("To Calculate Loss, use_triplet_loss and use_infoNCE_loss and use_image2image_loss cannot all be False")

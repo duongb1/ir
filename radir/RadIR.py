@@ -691,11 +691,9 @@ class RADIR(nn.Module):
             text_to_image = rearrange(text_to_image, 'm n ... -> (m n) ...').squeeze()    # 1 B B -> B B
             image_to_text = rearrange(image_to_text, 'm n ... -> (m n) ...').squeeze()    # 1 B B -> B B
             
-            # NOTE: Official loss calculation only treat diagonal as positive samples (1), others as negative (0)
-            # NOTE: Our implementation with soft similarity between each sample pair
-            
-            # gt_similarity_matrix = F.normalize(gt_similarity_matrix, dim=0) # B B
-            
+            if gt_similarity_matrix is None:
+                gt_similarity_matrix = torch.eye(text_to_image.shape[-1], device=text_to_image.device)
+
             if not (self.use_uncon_infoNCE_loss > 0 or self.use_uncon_triplet_loss > 0 or self.use_image2image_loss > 0):
                 raise ValueError("To Calculate Loss, use_triplet_loss and use_infoNCE_loss and use_image2image_loss cannot all be False")
             

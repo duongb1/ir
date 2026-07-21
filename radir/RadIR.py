@@ -676,32 +676,26 @@ class RADIR(nn.Module):
             # get temperature
 
             temp = self.temperature.exp()
-            text_latents = rearrange(text_latents, '(m b) ... -> m b ...', m = num_batch_texts) # 1 B 512
-            image_latents = rearrange(image_latents, '(m b) ... -> m b ...', m = num_batch_images) # 1 B 512
             
-            text_to_image = einsum('m t d, n i d -> m n t i', text_latents, image_latents) * temp   # 1 1 B B
-            image_to_text = rearrange(text_to_image, '... t i -> ... i t')
+            # Ensure text_latents and image_latents are 2D tensors [B, D]
+            if text_latents.ndim > 2:
+                text_latents = text_latents.reshape(-1, text_latents.shape[-1])
+            if image_latents.ndim > 2:
+                image_latents = image_latents.reshape(-1, image_latents.shape[-1])
+                
+            # Compute 2D similarity matrix [B, B]
+            text_to_image = torch.matmul(text_latents, image_latents.T) * temp
+            image_to_text = text_to_image.T
             
             if self.use_image2image_loss:
-                image_to_image = einsum('m t d, n i d -> m n t i', image_latents, image_latents) * temp   # 1 1 B B
-                image_to_image = image_to_image.squeeze(0).squeeze(0)
-                if image_to_image.dim() == 1:
-                    image_to_image = image_to_image.unsqueeze(0)
-                
-            # calculate loss
+                image_to_image = torch.matmul(image_latents, image_latents.T) * temp
 
-            text_to_image = rearrange(text_to_image, 'm n ... -> (m n) ...').squeeze(0)    # 1 B B -> B B
-            image_to_text = rearrange(image_to_text, 'm n ... -> (m n) ...').squeeze(0)    # 1 B B -> B B
-
-            if text_to_image.dim() == 1:
-                text_to_image = text_to_image.unsqueeze(0)
-            if image_to_text.dim() == 1:
-                image_to_text = image_to_text.unsqueeze(0)
-            
+            B = text_to_image.shape[0]
             if gt_similarity_matrix is None:
-                gt_similarity_matrix = torch.eye(text_to_image.shape[-1], device=text_to_image.device)
-            elif gt_similarity_matrix.dim() == 1:
-                gt_similarity_matrix = gt_similarity_matrix.unsqueeze(0)
+                gt_similarity_matrix = torch.eye(B, device=text_to_image.device)
+            else:
+                if gt_similarity_matrix.ndim > 2:
+                    gt_similarity_matrix = gt_similarity_matrix.reshape(B, B)
 
             if not (self.use_uncon_infoNCE_loss > 0 or self.use_uncon_triplet_loss > 0 or self.use_image2image_loss > 0):
                 raise ValueError("To Calculate Loss, use_triplet_loss and use_infoNCE_loss and use_image2image_loss cannot all be False")

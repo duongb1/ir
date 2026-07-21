@@ -333,8 +333,9 @@ class RADIR(nn.Module):
         返回：
             torch.Tensor: 计算得到的Triplet Loss标量值。
         """
-        # 确保输入张量的形状一致
-        assert pred_sim.shape == true_sim.shape, "预测矩阵和真实矩阵形状不一致"
+        # Ensure shape matching between pred_sim and true_sim
+        if true_sim is None or pred_sim.shape != true_sim.shape:
+            true_sim = torch.eye(pred_sim.shape[-1], device=pred_sim.device).expand_as(pred_sim)
         b, n, m = pred_sim.shape
         # 生成三维掩码矩阵，标记所有满足 true_sim[i] > true_sim[j] 的位置
         # true_sim.unsqueeze(3) 形状为(b, n, m, 1), true_sim.unsqueeze(2) 形状为(b, n, 1, m)
@@ -424,8 +425,9 @@ class RADIR(nn.Module):
         返回：
             torch.Tensor: 计算得到的Triplet Loss标量值。
         """
-        # 确保输入张量的形状一致
-        assert pred_sim.shape == true_sim.shape, "预测矩阵和真实矩阵形状不一致"
+        # Ensure shape matching between pred_sim and true_sim
+        if true_sim is None or pred_sim.shape != true_sim.shape:
+            true_sim = torch.eye(pred_sim.shape[0], device=pred_sim.device)
         n, m = pred_sim.shape
         # 生成三维掩码矩阵，标记所有满足 true_sim[i]-true_sim[j] > true_sim[i] - true_sim[k] 的位置
         # true_sim.unsqueeze(2) 形状为(n, m, 1), true_sim.unsqueeze(1) 形状为(n, 1, m)

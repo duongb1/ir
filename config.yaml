@@ -1,9 +1,9 @@
-# Configuration for Stage 1 Training on S.I.S Dataset
+# Configuration for Stage 1 Training on S.I.S Dataset (Kaggle 2x T4 Optimized)
 
-# Paths
-report_path: "c:/Users/DUONG/Desktop/RadIR/S.I.S/report_cleaned.xlsx"
-images_dir: "c:/Users/DUONG/Desktop/RadIR/S.I.S/images"
-output_dir: "c:/Users/DUONG/Desktop/RadIR/S.I.S/stage1/checkpoints"
+# Kaggle Dataset Paths
+report_path: "/kaggle/input/datasets/duongb/cthsis/report_cleaned.xlsx"
+images_dir: "/kaggle/input/datasets/duongb/cthsis/images"
+output_dir: "/kaggle/working/checkpoints"
 
 # Data parameters
 text_column: "KETLUAN_CLEAN"
@@ -15,6 +15,7 @@ target_depth: 32
 val_ratio: 0.15
 test_ratio: 0.15
 seed: 42
+num_workers: 4
 
 # Model parameters
 text_model_name: "vinai/phobert-base"
@@ -25,8 +26,9 @@ image_size: 480
 patch_size: 20
 temporal_patch_size: 4
 
-# Training parameters
-batch_size: 8
+# Training parameters for 2x T4 GPUs
+batch_size: 8              # Per-GPU batch size (Total effective batch size = 16 on 2 GPUs)
+use_amp: true              # Automatic Mixed Precision (FP16) for NVIDIA T4 Tensor Cores
 epochs: 20
 lr: 0.0001
 weight_decay: 0.01

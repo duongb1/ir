@@ -21,17 +21,15 @@ def compute_retrieval_metrics(image_embeds, text_embeds, k_values=(1, 5, 10)):
     targets = torch.arange(N, device=sim_matrix.device)
 
     # 1. Text-to-Image Retrieval (Query: Text, Target: Image)
-    # sim_matrix: rows = images, cols = text. Col j is similarity of text j to all images i.
-    t2i_sim = sim_matrix.T  # [N, N] where row j is text_j similarity to image_i
+    t2i_sim = sim_matrix.T  # [N, N]
     t2i_ranks = torch.argsort(t2i_sim, dim=1, descending=True)
     t2i_recalls = {}
     for k in k_values:
-        # Check if ground truth image_j is in top-K predictions for text_j
         hits = (t2i_ranks[:, :k] == targets.unsqueeze(1)).any(dim=1)
         t2i_recalls[f"R@{k}"] = hits.float().mean().item()
 
     # 2. Image-to-Text Retrieval (Query: Image, Target: Text)
-    i2t_sim = sim_matrix   # [N, N] where row i is image_i similarity to text_j
+    i2t_sim = sim_matrix   # [N, N]
     i2t_ranks = torch.argsort(i2t_sim, dim=1, descending=True)
     i2t_recalls = {}
     for k in k_values:
@@ -41,7 +39,7 @@ def compute_retrieval_metrics(image_embeds, text_embeds, k_values=(1, 5, 10)):
     return t2i_recalls, i2t_recalls
 
 @torch.no_grad()
-def evaluate_model(model, dataloader, tokenizer, device):
+def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
     """
     Evaluates model on dataloader by extracting embeddings and calculating Recall@K metrics.
     """
@@ -49,7 +47,6 @@ def evaluate_model(model, dataloader, tokenizer, device):
     all_image_embeds = []
     all_text_embeds = []
 
-    print("[Evaluate] Extracting embeddings on dataset...")
     for step, (images, text_list, idxs, modality_idxs) in enumerate(dataloader):
         images = images.to(device)
         modal_indices = modality_idxs.to(device)
@@ -63,20 +60,21 @@ def evaluate_model(model, dataloader, tokenizer, device):
             max_length=512
         ).to(device)
 
-        # Forward pass through RADIR
-        image_emb, text_emb, _, _ = model(
-            text_tokens,
-            image=images,
-            device=device,
-            is_condition=False,
-            return_latents=True,
-            modal_indexs=modal_indices,
-            modal_embedding=True
-        )
+        # Forward pass through RADIR with AMP context
+        with torch.cuda.amp.autocast(enabled=(use_amp and device.type == 'cuda')):
+            image_emb, text_emb, _, _ = model(
+                text_tokens,
+                image=images,
+                device=device,
+                is_condition=False,
+                return_latents=True,
+                modal_indexs=modal_indices,
+                modal_embedding=True
+            )
 
         # Normalize L2
-        image_emb = torch.nn.functional.normalize(image_emb, dim=-1)
-        text_emb = torch.nn.functional.normalize(text_emb, dim=-1)
+        image_emb = torch.nn.functional.normalize(image_emb.float(), dim=-1)
+        text_emb = torch.nn.functional.normalize(text_emb.float(), dim=-1)
 
         all_image_embeds.append(image_emb.cpu())
         all_text_embeds.append(text_emb.cpu())
@@ -110,7 +108,7 @@ if __name__ == '__main__':
         target_depth=config['target_depth'],
         is_train=False
     )
-    dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=0)
+    dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config.get('num_workers', 4))
 
     # Build model
     model, tokenizer = build_stage1_model(
@@ -125,7 +123,7 @@ if __name__ == '__main__':
         print(f"[Evaluate] Loading checkpoint: {args.checkpoint}")
         model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
-    t2i_recalls, i2t_recalls = evaluate_model(model, dataloader, tokenizer, device)
+    t2i_recalls, i2t_recalls = evaluate_model(model, dataloader, tokenizer, device, use_amp=config.get('use_amp', True))
 
     print("\n" + "="*50)
     print("EVALUATION RESULTS (S.I.S Stage 1 Retrieval)")

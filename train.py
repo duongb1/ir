@@ -20,7 +20,7 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 def main():
-    parser = argparse.ArgumentParser(description="Train Stage 1 RadIR model on S.I.S dataset")
+    parser = argparse.ArgumentParser(description="Train Stage 1 RadIR model on S.I.S dataset (Kaggle 2x T4 Optimized)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--report_path", type=str, default=None, help="Override report_path")
     parser.add_argument("--images_dir", type=str, default=None, help="Override images_dir")
@@ -45,7 +45,8 @@ def main():
 
     set_seed(config.get('seed', 42))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[Train] Using device: {device}")
+    num_gpus = torch.cuda.device_count()
+    print(f"[Train] Device: {device} | Available GPUs: {num_gpus}")
 
     # Create output directory
     os.makedirs(config['output_dir'], exist_ok=True)
@@ -75,22 +76,23 @@ def main():
 
     print(f"[Train] Dataset Split: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
 
+    num_workers = config.get('num_workers', 4)
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config['batch_size'],
+        batch_size=config['batch_size'] * max(1, num_gpus),
         shuffle=True,
-        num_workers=0,
+        num_workers=num_workers,
         pin_memory=(device.type == 'cuda')
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config['batch_size'],
+        batch_size=config['batch_size'] * max(1, num_gpus),
         shuffle=False,
-        num_workers=0
+        num_workers=num_workers
     )
 
     # 2. Build Model & Tokenizer
-    model, tokenizer = build_stage1_model(
+    raw_model, tokenizer = build_stage1_model(
         model_name_or_path=config['text_model_name'],
         dim_text=config['dim_text'],
         dim_image=config['dim_image'],
@@ -102,6 +104,13 @@ def main():
         use_infoNCE_loss=config['use_infoNCE_loss'],
         device=device
     )
+
+    # Wrap model in DataParallel for 2x T4 GPUs if available
+    if num_gpus > 1:
+        print(f"[Train] Wrapping model in DataParallel for {num_gpus} GPUs")
+        model = nn.DataParallel(raw_model)
+    else:
+        model = raw_model
 
     # Optimizer & Scheduler
     optimizer = torch.optim.AdamW(
@@ -117,6 +126,11 @@ def main():
         num_warmup_steps=warmup_steps,
         num_training_steps=total_steps
     )
+
+    # Automatic Mixed Precision (AMP FP16) for Tensor Cores
+    use_amp = config.get('use_amp', True) and device.type == 'cuda'
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    print(f"[Train] Automatic Mixed Precision (AMP FP16): {'ENABLED' if use_amp else 'DISABLED'}")
 
     # 3. Training Loop
     print(f"[Train] Starting Stage 1 Training for {config['epochs']} epochs...")
@@ -141,22 +155,37 @@ def main():
 
             optimizer.zero_grad()
 
-            # Forward pass: RADIR computes Contrastive + Triplet Loss in forward pass
-            loss = model(
-                text_tokens,
-                image=images,
-                device=device,
-                is_condition=False,
-                modal_indexs=modal_indices,
-                modal_embedding=True
-            )
+            # Forward pass with AMP FP16 context
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                if num_gpus > 1:
+                    loss = model(
+                        text_tokens,
+                        image=images,
+                        device=device,
+                        is_condition=False,
+                        modal_indexs=modal_indices,
+                        modal_embedding=True
+                    )
+                else:
+                    loss = model(
+                        text_tokens,
+                        image=images,
+                        device=device,
+                        is_condition=False,
+                        modal_indexs=modal_indices,
+                        modal_embedding=True
+                    )
 
             if isinstance(loss, tuple):
                 loss = loss[0]
+            if loss.dim() > 0:
+                loss = loss.mean()
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.get('max_grad_norm', 1.0))
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
             total_loss += loss.item()
@@ -166,7 +195,7 @@ def main():
 
         # Evaluation
         if epoch % config.get('eval_every_epochs', 1) == 0 or epoch == config['epochs']:
-            t2i_recalls, i2t_recalls = evaluate_model(model, val_loader, tokenizer, device)
+            t2i_recalls, i2t_recalls = evaluate_model(raw_model, val_loader, tokenizer, device, use_amp=use_amp)
             val_r1 = t2i_recalls.get("R@1", 0.0)
 
             print(f"   [Val Eval] T2I R@1: {t2i_recalls['R@1']*100:.2f}% | R@5: {t2i_recalls['R@5']*100:.2f}% | R@10: {t2i_recalls['R@10']*100:.2f}%")
@@ -176,13 +205,13 @@ def main():
             if val_r1 > best_val_r1:
                 best_val_r1 = val_r1
                 best_ckpt_path = os.path.join(config['output_dir'], "best_stage1_model.pt")
-                torch.save(model.state_dict(), best_ckpt_path)
+                torch.save(raw_model.state_dict(), best_ckpt_path)
                 print(f"   [Checkpoint] Best model saved to {best_ckpt_path} (T2I R@1={val_r1*100:.2f}%)")
 
         # Save periodic checkpoint
         if epoch % config.get('save_every_epochs', 5) == 0:
             ckpt_path = os.path.join(config['output_dir'], f"stage1_epoch_{epoch}.pt")
-            torch.save(model.state_dict(), ckpt_path)
+            torch.save(raw_model.state_dict(), ckpt_path)
 
     print("\n[Train] Training complete!")
 

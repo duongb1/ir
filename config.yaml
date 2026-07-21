@@ -10,10 +10,11 @@ text_column: "KETLUAN_CLEAN"
 id_column: "STT"
 sequences:
   - "DWI"
+  - "ADC"
 target_image_size: [384, 384]
 target_depth: 32
-val_ratio: 0.15
-test_ratio: 0.15
+val_ratio: 0.10
+test_ratio: 0.20
 seed: 42
 num_workers: 2
 

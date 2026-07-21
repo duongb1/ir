@@ -661,8 +661,12 @@ class RADIR(nn.Module):
             
 
             text_embeds = text_embeds[:,0,:] # B 768
-
             text_latents = self.to_text_latent(text_embeds) # B 512
+
+            if image_embeds.ndim == 5:
+                image_embeds = image_embeds.mean(dim=(1, 2, 3)) # B dim
+            elif image_embeds.ndim == 3:
+                image_embeds = image_embeds.mean(dim=1) # B dim
 
             image_latents = self.to_visual_latent(image_embeds) # B 512
 

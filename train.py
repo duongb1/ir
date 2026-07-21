@@ -79,17 +79,23 @@ def main():
 
     print(f"[Train] Dataset Split: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
 
-    num_workers = config.get('num_workers', 4)
+    num_workers = config.get('num_workers', 2)
+    per_gpu_batch = config['batch_size']
+    total_batch_per_step = per_gpu_batch * max(1, num_gpus)
+    grad_accum_steps = config.get('gradient_accumulation_steps', 4)
+
+    print(f"[Train] Per-GPU Batch Size: {per_gpu_batch} | Effective Step Batch Size: {total_batch_per_step} | Grad Accum Steps: {grad_accum_steps} (Effective Total Batch: {total_batch_per_step * grad_accum_steps})")
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config['batch_size'] * max(1, num_gpus),
+        batch_size=total_batch_per_step,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=(device.type == 'cuda')
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config['batch_size'] * max(1, num_gpus),
+        batch_size=total_batch_per_step,
         shuffle=False,
         num_workers=num_workers
     )
@@ -122,17 +128,17 @@ def main():
         weight_decay=config.get('weight_decay', 0.01)
     )
 
-    total_steps = len(train_loader) * config['epochs']
+    total_steps = (len(train_loader) // grad_accum_steps) * config['epochs']
     warmup_steps = int(total_steps * config.get('warmup_ratio', 0.1))
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
-        num_training_steps=total_steps
+        num_training_steps=max(1, total_steps)
     )
 
-    # Automatic Mixed Precision (AMP FP16) for Tensor Cores
+    # Automatic Mixed Precision (AMP FP16) - PyTorch 2.x updated API
     use_amp = config.get('use_amp', True) and device.type == 'cuda'
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
     print(f"[Train] Automatic Mixed Precision (AMP FP16): {'ENABLED' if use_amp else 'DISABLED'}")
 
     # 3. Training Loop
@@ -142,6 +148,7 @@ def main():
     for epoch in range(1, config['epochs'] + 1):
         model.train()
         total_loss = 0.0
+        optimizer.zero_grad()
 
         for step, (images, text_list, idxs, modality_idxs) in enumerate(train_loader):
             images = images.to(device)
@@ -156,45 +163,41 @@ def main():
                 max_length=512
             ).to(device)
 
-            optimizer.zero_grad()
-
-            # Forward pass with AMP FP16 context
-            with torch.cuda.amp.autocast(enabled=use_amp):
-                if num_gpus > 1:
-                    loss = model(
-                        text_tokens,
-                        image=images,
-                        device=device,
-                        is_condition=False,
-                        modal_indexs=modal_indices,
-                        modal_embedding=True
-                    )
-                else:
-                    loss = model(
-                        text_tokens,
-                        image=images,
-                        device=device,
-                        is_condition=False,
-                        modal_indexs=modal_indices,
-                        modal_embedding=True
-                    )
+            # Forward pass with PyTorch 2.x torch.amp.autocast
+            with torch.amp.autocast('cuda', enabled=use_amp):
+                loss = model(
+                    text_tokens,
+                    image=images,
+                    device=device,
+                    is_condition=False,
+                    modal_indexs=modal_indices,
+                    modal_embedding=True
+                )
 
             if isinstance(loss, tuple):
                 loss = loss[0]
             if loss.dim() > 0:
                 loss = loss.mean()
 
+            # Normalize loss for gradient accumulation
+            loss = loss / grad_accum_steps
             scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.get('max_grad_norm', 1.0))
-            scaler.step(optimizer)
-            scaler.update()
-            scheduler.step()
 
-            total_loss += loss.item()
+            if (step + 1) % grad_accum_steps == 0 or (step + 1) == len(train_loader):
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.get('max_grad_norm', 1.0))
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                scheduler.step()
+
+            total_loss += loss.item() * grad_accum_steps
 
         avg_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch:02d}/{config['epochs']:02d} | Train Loss: {avg_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}")
+
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
 
         # Evaluation
         if epoch % config.get('eval_every_epochs', 1) == 0 or epoch == config['epochs']:

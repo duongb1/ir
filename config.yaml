@@ -10,25 +10,26 @@ text_column: "KETLUAN_CLEAN"
 id_column: "STT"
 sequences:
   - "DWI"
-target_image_size: [480, 480]
+target_image_size: [384, 384]
 target_depth: 32
 val_ratio: 0.15
 test_ratio: 0.15
 seed: 42
-num_workers: 4
+num_workers: 2
 
 # Model parameters
 text_model_name: "vinai/phobert-base"
 dim_text: 768
 dim_image: 512
 dim_latent: 512
-image_size: 480
-patch_size: 20
+image_size: 384
+patch_size: 16
 temporal_patch_size: 4
 
 # Training parameters for 2x T4 GPUs
-batch_size: 8              # Per-GPU batch size (Total effective batch size = 16 on 2 GPUs)
-use_amp: true              # Automatic Mixed Precision (FP16) for NVIDIA T4 Tensor Cores
+batch_size: 2                      # Per-GPU batch size (2 per GPU = 4 total per step)
+gradient_accumulation_steps: 4     # Effective batch size = 4 x 4 = 16!
+use_amp: true                      # Automatic Mixed Precision (FP16)
 epochs: 20
 lr: 0.0001
 weight_decay: 0.01

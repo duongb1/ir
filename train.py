@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default=None, help="Override output_dir")
     parser.add_argument("--epochs", type=int, default=None, help="Override epochs")
     parser.add_argument("--batch_size", type=int, default=None, help="Override batch_size")
+    parser.add_argument("--lr", type=float, default=None, help="Override lr")
     parser.add_argument("--single_gpu", action="store_true", help="Force single GPU usage on cuda:0")
     args = parser.parse_args()
 

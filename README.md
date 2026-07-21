@@ -27,8 +27,8 @@ Mã nguồn phụ thuộc vào thư viện RadIR và `transformer_maskgit`:
 # Kích hoạt môi trường RadIR
 conda activate RadIR
 
-# Cài đặt PhoBERT và các thư viện hỗ trợ
-pip install transformers sentencepiece openpyxl pyyaml
+# Cài đặt toàn bộ thư viện phụ thuộc
+pip install -r requirements.txt
 ```
 
 ---

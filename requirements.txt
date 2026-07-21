@@ -1,0 +1,9 @@
+vector-quantize-pytorch
+einops
+beartype
+positional-encodings
+transformers
+openpyxl
+pyyaml
+pandas
+scipy

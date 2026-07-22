@@ -55,9 +55,9 @@ class VisionMIL(nn.Module):
         # Compute raw attention scores per slice
         attn_scores = self.attention(feats).squeeze(-1) # [B, N]
 
-        # Apply Attention Masking (-1e9 for padded slices)
+        # Apply Attention Masking (-10000.0 for AMP FP16 compatibility)
         if mask is not None:
-            attn_scores = attn_scores.masked_fill(~mask, -1e9)
+            attn_scores = attn_scores.masked_fill(~mask, -10000.0)
 
         # Softmax over valid slices
         attn_weights = F.softmax(attn_scores, dim=1).unsqueeze(-1) # [B, N, 1]

@@ -131,12 +131,20 @@ def main():
     else:
         model = raw_model
 
-    # Optimizer & Scheduler
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config['lr'],
-        weight_decay=config.get('weight_decay', 0.01)
-    )
+    # Differential Learning Rates: lower LR for pre-trained backbones, higher LR for projection heads
+    backbone_keywords = ['text_transformer', 'visual_transformer']
+    backbone_params = [p for name, p in raw_model.named_parameters() if p.requires_grad and any(k in name for k in backbone_keywords)]
+    head_params = [p for name, p in raw_model.named_parameters() if p.requires_grad and not any(k in name for k in backbone_keywords)]
+
+    base_lr = config['lr']
+    backbone_lr = config.get('backbone_lr', base_lr * 0.1)
+
+    optimizer = torch.optim.AdamW([
+        {'params': backbone_params, 'lr': backbone_lr},
+        {'params': head_params, 'lr': base_lr}
+    ], weight_decay=config.get('weight_decay', 0.01))
+
+    print(f"[Train] Differential LRs: Head LR={base_lr}, Backbone LR={backbone_lr}")
 
     total_steps = (len(train_loader) // grad_accum_steps) * config['epochs']
     warmup_steps = int(total_steps * config.get('warmup_ratio', 0.1))

@@ -34,9 +34,10 @@ batch_size: 8                      # Single GPU batch size (8x256x256 image take
 gradient_accumulation_steps: 2     # Effective batch size = 8 x 2 = 16
 use_amp: true                      # Automatic Mixed Precision (FP16)
 epochs: 20
-lr: 0.0001
+lr: 0.0001                          # Projection heads learning rate
+backbone_lr: 0.00001                # Differential LR for pre-trained backbones (1e-5)
 weight_decay: 0.01
-warmup_ratio: 0.1
+warmup_ratio: 0.15                  # Smoother 15% warmup
 save_every_epochs: 5
 eval_every_epochs: 1
 max_grad_norm: 1.0
@@ -44,4 +45,5 @@ max_grad_norm: 1.0
 # Loss parameters
 use_triplet_loss: 1.0
 use_infoNCE_loss: 1.0
+triplet_loss_margin: 0.1            # Mild initial margin to prevent gradient shock
 temperature: 0.07

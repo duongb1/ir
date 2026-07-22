@@ -121,6 +121,35 @@ class SISMRIDataset(Dataset):
             padded = F.pad(volume, (0, 0, 0, 0, pad_before, pad_after), value=-1.0)
             return padded.squeeze(0).squeeze(0)
 
+    def apply_3d_aug(self, volume_tensor):
+        """
+        Applies medical-safe 3D data augmentation to volume_tensor [1, Depth, Height, Width]:
+        - NO Horizontal/Vertical Flips (preserves left/right medical semantics)
+        - Contrast scaling (0.9 to 1.1)
+        - Additive Gaussian Noise (sigma = 0.02)
+        - Small random translation (up to 5% shift)
+        """
+        # 1. Random Contrast Scaling
+        if torch.rand(1).item() > 0.5:
+            scale = torch.empty(1).uniform_(0.9, 1.1).item()
+            volume_tensor = torch.clamp(volume_tensor * scale, -1.0, 1.0)
+
+        # 2. Additive Gaussian Noise
+        if torch.rand(1).item() > 0.5:
+            noise = torch.randn_like(volume_tensor) * 0.02
+            volume_tensor = torch.clamp(volume_tensor + noise, -1.0, 1.0)
+
+        # 3. Small Random Translation (up to 5% shift)
+        if torch.rand(1).item() > 0.5:
+            _, d, h, w = volume_tensor.shape
+            max_shift_h = max(1, int(h * 0.05))
+            max_shift_w = max(1, int(w * 0.05))
+            shift_h = int(torch.randint(-max_shift_h, max_shift_h + 1, (1,)).item())
+            shift_w = int(torch.randint(-max_shift_w, max_shift_w + 1, (1,)).item())
+            volume_tensor = torch.roll(volume_tensor, shifts=(shift_h, shift_w), dims=(2, 3))
+
+        return volume_tensor
+
     def __getitem__(self, idx):
         stt, text_str, case_dir = self.samples[idx]
 
@@ -139,6 +168,10 @@ class SISMRIDataset(Dataset):
             # If multiple sequences, average or stack them. Default: average or take primary sequence
             volume_tensor = torch.stack(volumes, dim=0).mean(dim=0) # [Depth, Height, Width]
             volume_tensor = volume_tensor.unsqueeze(0) # [1, Depth, Height, Width]
+
+        # Apply medical-safe 3D data augmentation during training
+        if self.is_train:
+            volume_tensor = self.apply_3d_aug(volume_tensor)
 
         # Format text string
         text_str = str(text_str).strip()

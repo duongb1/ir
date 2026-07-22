@@ -169,12 +169,19 @@ def main():
                 max_length=512
             ).to(device)
 
+            # Compute ground-truth text-to-text similarity matrix (T) using PhoBERT embeddings
+            with torch.no_grad():
+                text_embs = raw_model.text_transformer(text_tokens.input_ids, attention_mask=text_tokens.attention_mask)[0][:, 0, :]
+                text_embs = torch.nn.functional.normalize(text_embs.float(), dim=-1)
+                gt_sim_matrix = torch.matmul(text_embs, text_embs.T)
+
             # Forward pass with PyTorch 2.x torch.amp.autocast
             with torch.amp.autocast('cuda', enabled=use_amp):
                 loss = model(
                     text_tokens,
                     image=images,
                     device=device,
+                    gt_similarity_matrix=gt_sim_matrix,
                     is_condition=False,
                     modal_indexs=modal_indices,
                     modal_embedding=True

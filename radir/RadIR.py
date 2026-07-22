@@ -778,7 +778,7 @@ class RADIR(nn.Module):
             # calculate CL loss
             
             cl_losses = torch.zeros(1).to(device)
-            # cl_losses += self.use_uncon_triplet_loss * image_text_triplet_loss  # 为什么这里不使用image2text loss 了,加一个实验试一下
+            cl_losses += self.use_uncon_triplet_loss * image_text_triplet_loss
             cl_losses += self.use_image2image_loss * image_to_image_triplet_loss
             cl_losses += self.use_uncon_infoNCE_loss * image_text_infoNCE_loss
 

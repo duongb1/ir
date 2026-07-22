@@ -11,7 +11,7 @@ id_column: "STT"
 sequences:
   - "DWI"
   - "ADC"
-target_image_size: [384, 384]
+target_image_size: [256, 256]
 target_depth: 32
 val_ratio: 0.10
 test_ratio: 0.20
@@ -20,11 +20,12 @@ num_workers: 2
 
 # Model parameters
 text_model_name: "vinai/phobert-base"
+freeze_text_encoder: true           # Freeze PhoBERT encoder weights to save VRAM
 dim_text: 768
 dim_image: 512
 dim_latent: 512
 resnet_depth: 18                    # 3D ResNet depth: 18 (default, light & fast for 16GB VRAM) or 50
-image_size: 384
+image_size: 256
 patch_size: 16
 temporal_patch_size: 4
 

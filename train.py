@@ -120,6 +120,10 @@ def main():
         device=device
     )
 
+    if config.get('freeze_text_encoder', False):
+        print("[Train] Freezing PhoBERT text encoder weights to optimize VRAM")
+        raw_model.freeze_text_encoder()
+
     # Wrap model in DataParallel for 2x T4 GPUs if available
     if num_gpus > 1:
         print(f"[Train] Wrapping model in DataParallel for {num_gpus} GPUs")

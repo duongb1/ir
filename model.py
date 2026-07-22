@@ -36,10 +36,11 @@ def build_stage1_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     text_encoder = AutoModel.from_pretrained(model_name_or_path)
 
-    # 2. Build 3D Vision Encoder (ResNet3D)
-    print(f"[Model] Initializing ResNet3D 3D Vision Encoder")
+    # 2. Build 3D Vision Encoder (ResNet3D-50)
+    print(f"[Model] Initializing ResNet3D-50 3D Vision Encoder")
     image_encoder = ResNet3DEncoder(
         dim=dim_image,
+        depth=50,
         pretrained=True
     )
 

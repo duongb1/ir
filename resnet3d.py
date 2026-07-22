@@ -3,20 +3,30 @@ import torch.nn as nn
 import torchvision.models.video as models
 
 class ResNet3DEncoder(nn.Module):
-    def __init__(self, dim=512, pretrained=True):
+    def __init__(self, dim=512, depth=50, pretrained=True):
         super(ResNet3DEncoder, self).__init__()
-        weights = models.R3D_18_Weights.DEFAULT if pretrained else None
-        # Load the 3D ResNet-18 model
-        self.base_model = models.r3d_18(weights=weights)
+        self.depth = depth
+        if depth == 50:
+            from torchvision.models.video.resnet import VideoResNet, Bottleneck, Conv3DSimple, BasicStem
+            self.base_model = VideoResNet(
+                block=Bottleneck,
+                conv_makers=[Conv3DSimple]*4,
+                layers=[3, 4, 6, 3],
+                stem=BasicStem
+            )
+            in_features = 2048
+        else:
+            weights = models.R3D_18_Weights.DEFAULT if pretrained else None
+            self.base_model = models.r3d_18(weights=weights)
+            in_features = 512
         
         # Remove the classification head (fc layer)
-        # The output of the avgpool is [B, 512, 1, 1, 1]
         self.base_model = nn.Sequential(*list(self.base_model.children())[:-1])
         
         # Projection head to map to the desired output dimension
         self.proj = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(512, dim)
+            nn.Linear(in_features, dim)
         )
 
     def forward(self, x, return_encoded_tokens=False, modal_embedding=False, modal_indexs=None, is_condition=False):

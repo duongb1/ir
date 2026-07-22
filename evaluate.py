@@ -62,7 +62,7 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
 
         # Forward pass through RADIR with AMP context
         with torch.amp.autocast('cuda', enabled=(use_amp and device.type == 'cuda')):
-            image_emb, text_emb, _, _ = model(
+            text_emb, image_emb, _, _ = model(
                 text_tokens,
                 image=images,
                 device=device,

@@ -46,9 +46,9 @@ class SISMRIDataset(Dataset):
         self.samples = []
         for _, row in self.df.iterrows():
             stt = str(int(row[self.id_column])) if pd.notna(row[self.id_column]) else None
-            text = str(row[self.text_column]) if pd.notna(row[self.text_column]) else ""
+            text = str(row[self.text_column]).strip() if pd.notna(row[self.text_column]) else ""
             
-            if stt is not None:
+            if stt is not None and text and text.lower() != 'nan':
                 # Check if case directory exists
                 case_dir = os.path.join(self.images_dir, stt)
                 if os.path.exists(case_dir):
@@ -142,8 +142,6 @@ class SISMRIDataset(Dataset):
 
         # Format text string
         text_str = str(text_str).strip()
-        if not text_str or text_str.lower() == 'nan':
-            text_str = "Hình ảnh MRI sọ não trong giới hạn bình thường trên chuỗi xung DWI và ADC."
 
         # Modality index (0 for 3D MRI)
         modality_idx = 0

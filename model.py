@@ -5,7 +5,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel
-from transformer_maskgit import CTViT
+from resnet3d import ResNet3DEncoder
 from radir import RADIR
 
 def build_stage1_model(
@@ -36,19 +36,11 @@ def build_stage1_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     text_encoder = AutoModel.from_pretrained(model_name_or_path)
 
-    # 2. Build 3D ViT Vision Encoder (CTViT)
-    print(f"[Model] Initializing CTViT 3D Vision Encoder (image_size={image_size})")
-    image_encoder = CTViT(
+    # 2. Build 3D Vision Encoder (ResNet3D)
+    print(f"[Model] Initializing ResNet3D 3D Vision Encoder")
+    image_encoder = ResNet3DEncoder(
         dim=dim_image,
-        codebook_size=8192,
-        image_size=image_size,
-        patch_size=patch_size,
-        temporal_patch_size=temporal_patch_size,
-        spatial_depth=spatial_depth,
-        temporal_depth=temporal_depth,
-        cls_depth=cls_depth,
-        dim_head=dim_head,
-        heads=heads
+        pretrained=True
     )
 
     # 3. Instantiate RADIR Stage 1 Model

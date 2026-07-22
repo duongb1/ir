@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel
 from resnet3d import ResNet3DEncoder
+from resnet2d_mil import VisionMIL
 from radir import RADIR
 
 def build_stage1_model(
@@ -13,8 +14,9 @@ def build_stage1_model(
     dim_text=768,
     dim_image=512,
     dim_latent=512,
+    vision_type="mil_2d",
     resnet_depth=18,
-    image_size=384,
+    image_size=256,
     patch_size=16,
     temporal_patch_size=4,
     spatial_depth=8,
@@ -27,7 +29,7 @@ def build_stage1_model(
     device=None
 ):
     """
-    Builds and initializes the Stage 1 RadIR model using ResNet3D (Vision) and PhoBERT (Text).
+    Builds and initializes the Stage 1 RadIR model using Vision Encoder (2D ABMIL or ResNet3D) and PhoBERT (Text).
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -37,13 +39,21 @@ def build_stage1_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     text_encoder = AutoModel.from_pretrained(model_name_or_path)
 
-    # 2. Build 3D Vision Encoder (ResNet3D)
-    print(f"[Model] Initializing ResNet3D-{resnet_depth} 3D Vision Encoder")
-    image_encoder = ResNet3DEncoder(
-        dim=dim_image,
-        depth=resnet_depth,
-        pretrained=True
-    )
+    # 2. Build Vision Encoder (2D ABMIL with Lesion Map or ResNet3D)
+    if vision_type == "mil_2d":
+        print(f"[Model] Initializing 2D ABMIL Vision Encoder (ResNet{resnet_depth} + Lesion Map)")
+        image_encoder = VisionMIL(
+            embed_dim=dim_image,
+            depth=resnet_depth,
+            pretrained=True
+        )
+    else:
+        print(f"[Model] Initializing ResNet3D-{resnet_depth} 3D Vision Encoder")
+        image_encoder = ResNet3DEncoder(
+            dim=dim_image,
+            depth=resnet_depth,
+            pretrained=True
+        )
 
     # 3. Instantiate RADIR Stage 1 Model
     print(f"[Model] Wrapping into RADIR Stage 1 framework (dim_latent={dim_latent})")

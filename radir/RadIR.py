@@ -509,6 +509,7 @@ class RADIR(nn.Module):
             image,  # B local_B 1 H W D
             device,
             gt_similarity_matrix=None,  # B local_B local_B
+            mask=None,
             return_loss = False,
             return_latents = False,
             is_condition = True,
@@ -655,7 +656,7 @@ class RADIR(nn.Module):
 
             text_embeddings = self.text_transformer(text.input_ids, attention_mask = text.attention_mask )
             enc_text = text_embeddings[0]   # B 512(token_len) 512
-            enc_image= self.visual_transformer(image,modal_embedding=modal_embedding,modal_indexs = modal_indexs)   # B 24 24 24 512(vis_dim)
+            enc_image= self.visual_transformer(image, mask=mask, modal_embedding=modal_embedding, modal_indexs=modal_indexs)
  
     
             # h_r, w_r, z_r = enc_image.shape[1], enc_image.shape[2], enc_image.shape[3]

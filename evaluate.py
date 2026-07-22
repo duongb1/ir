@@ -47,7 +47,14 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
     all_image_embeds = []
     all_text_embeds = []
 
-    for step, (images, text_list, idxs, modality_idxs) in enumerate(dataloader):
+    for step, batch in enumerate(dataloader):
+        if len(batch) == 5:
+            images, text_list, idxs, modality_idxs, mask = batch
+            mask = mask.to(device, non_blocking=True)
+        else:
+            images, text_list, idxs, modality_idxs = batch
+            mask = None
+
         images = images.to(device)
         modal_indices = modality_idxs.to(device)
 
@@ -65,6 +72,7 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
             text_emb, image_emb, _, _ = model(
                 text_tokens,
                 image=images,
+                mask=mask,
                 device=device,
                 is_condition=False,
                 return_latents=True,

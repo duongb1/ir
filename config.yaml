@@ -21,10 +21,11 @@ num_workers: 2
 # Model parameters
 text_model_name: "vinai/phobert-base"
 freeze_text_encoder: true           # Freeze PhoBERT encoder weights to save VRAM
+vision_type: "mil_2d"               # Vision encoder: "mil_2d" (2D ABMIL + Lesion Map) or "resnet3d"
 dim_text: 768
 dim_image: 512
 dim_latent: 512
-resnet_depth: 18                    # 3D ResNet depth: 18 (default, light & fast for 16GB VRAM) or 50
+resnet_depth: 18                    # 2D/3D ResNet depth: 18 (default, light & fast) or 50
 image_size: 256
 patch_size: 16
 temporal_patch_size: 4

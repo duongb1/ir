@@ -12,6 +12,7 @@ class SISMRIDataset(Dataset):
     """
     Dataset loader for S.I.S Brain MRI dataset.
     Loads 2D JPG slice series from S.I.S/images/{STT}/{sequences} and pairs them with text reports.
+    Supports both 3D Volume mode and 2D MIL 3-Channel Fusion mode (ADC, DWI, DWI-ADC Lesion Map).
     """
     def __init__(
         self,
@@ -19,9 +20,10 @@ class SISMRIDataset(Dataset):
         images_dir,
         text_column="KETLUAN",
         id_column="STT",
-        sequences=("DWI",),  # Can be ("DWI",), ("ADC",), or ("DWI", "ADC")
-        target_image_size=(480, 480),
-        target_depth=240,
+        sequences=("DWI", "ADC"),  # Default ("DWI", "ADC")
+        target_image_size=(256, 256),
+        target_depth=32,
+        use_mil_2d=True,
         is_train=True,
         need_aug=False
     ):
@@ -33,6 +35,7 @@ class SISMRIDataset(Dataset):
         self.sequences = [sequences] if isinstance(sequences, str) else list(sequences)
         self.target_image_size = target_image_size
         self.target_depth = target_depth
+        self.use_mil_2d = use_mil_2d
         self.is_train = is_train
         self.need_aug = need_aug
 
@@ -54,7 +57,7 @@ class SISMRIDataset(Dataset):
                 if os.path.exists(case_dir):
                     self.samples.append((stt, text, case_dir))
 
-        print(f"[SISMRIDataset] Loaded {len(self.samples)} valid samples from {report_path}")
+        print(f"[SISMRIDataset] Loaded {len(self.samples)} valid samples from {report_path} (2D MIL 3-Channel Mode: {use_mil_2d})")
 
     def __len__(self):
         return len(self.samples)
@@ -86,8 +89,8 @@ class SISMRIDataset(Dataset):
                 if img.size != (target_w, target_h):
                     img = img.resize((target_w, target_h), Image.BILINEAR)
                 
-                # Normalize pixel values to [-1, 1]
-                arr = (np.array(img, dtype=np.float32) / 255.0) * 2.0 - 1.0
+                # Normalize pixel values to [0, 1] for channel fusion
+                arr = np.array(img, dtype=np.float32) / 255.0
                 slice_tensors.append(torch.from_numpy(arr))
             except Exception as e:
                 continue
@@ -98,6 +101,41 @@ class SISMRIDataset(Dataset):
         # Stack slices along depth dimension: shape [Depth, Height, Width]
         volume = torch.stack(slice_tensors, dim=0)
         return volume
+
+    def load_multichannel_mil_slices(self, case_dir):
+        """
+        Loads paired DWI and ADC slices and constructs a 3-channel slice tensor:
+        Channel 0: ADC [0, 1]
+        Channel 1: DWI [0, 1]
+        Channel 2: Lesion Map = clamp(DWI - ADC, 0.0, 1.0)
+        Returns tensor shape [Depth, 3, Height, Width]
+        """
+        dwi_vol = self.load_sequence_slices(case_dir, "DWI")
+        adc_vol = self.load_sequence_slices(case_dir, "ADC")
+
+        if dwi_vol is None and adc_vol is None:
+            return None
+
+        if dwi_vol is None:
+            dwi_vol = adc_vol.clone()
+        if adc_vol is None:
+            adc_vol = dwi_vol.clone()
+
+        # Align depth dimensions between DWI and ADC
+        min_depth = min(dwi_vol.shape[0], adc_vol.shape[0])
+        dwi_vol = dwi_vol[:min_depth]
+        adc_vol = adc_vol[:min_depth]
+
+        # Compute Lesion Map: clamp(DWI - ADC, 0.0, 1.0)
+        lesion_map = torch.clamp(dwi_vol - adc_vol, min=0.0, max=1.0)
+
+        # Stack into 3 channels [Depth, 3, Height, Width]
+        multichannel_slices = torch.stack([adc_vol, dwi_vol, lesion_map], dim=1) # [Depth, 3, H, W]
+
+        # Normalize from [0, 1] to [-1, 1]
+        multichannel_slices = multichannel_slices * 2.0 - 1.0
+
+        return multichannel_slices
 
     def pad_or_crop_depth(self, volume):
         """
@@ -116,14 +154,13 @@ class SISMRIDataset(Dataset):
             # Pad depth evenly on both sides
             pad_before = (target_d - curr_d) // 2
             pad_after = target_d - curr_d - pad_before
-            # F.pad expects padding for (last_dim, ..., first_dim) -> (w, h, depth)
             volume = volume.unsqueeze(0).unsqueeze(0) # [1, 1, Depth, Height, Width]
             padded = F.pad(volume, (0, 0, 0, 0, pad_before, pad_after), value=-1.0)
             return padded.squeeze(0).squeeze(0)
 
     def apply_3d_aug(self, volume_tensor):
         """
-        Applies medical-safe 3D data augmentation to volume_tensor [1, Depth, Height, Width]:
+        Applies medical-safe 3D data augmentation to volume_tensor:
         - NO Horizontal/Vertical Flips (preserves left/right medical semantics)
         - Contrast scaling (0.9 to 1.1)
         - Additive Gaussian Noise (sigma = 0.02)
@@ -141,35 +178,42 @@ class SISMRIDataset(Dataset):
 
         # 3. Small Random Translation (up to 5% shift)
         if torch.rand(1).item() > 0.5:
-            _, d, h, w = volume_tensor.shape
+            spatial_dims = (2, 3) if volume_tensor.ndim == 4 else (1, 2)
+            h, w = volume_tensor.shape[spatial_dims[0]], volume_tensor.shape[spatial_dims[1]]
             max_shift_h = max(1, int(h * 0.05))
             max_shift_w = max(1, int(w * 0.05))
             shift_h = int(torch.randint(-max_shift_h, max_shift_h + 1, (1,)).item())
             shift_w = int(torch.randint(-max_shift_w, max_shift_w + 1, (1,)).item())
-            volume_tensor = torch.roll(volume_tensor, shifts=(shift_h, shift_w), dims=(2, 3))
+            volume_tensor = torch.roll(volume_tensor, shifts=(shift_h, shift_w), dims=spatial_dims)
 
         return volume_tensor
 
     def __getitem__(self, idx):
         stt, text_str, case_dir = self.samples[idx]
 
-        # Load MRI volume from configured sequences
-        volumes = []
-        for seq_name in self.sequences:
-            vol = self.load_sequence_slices(case_dir, seq_name)
-            if vol is not None:
-                vol = self.pad_or_crop_depth(vol)
-                volumes.append(vol)
-
-        if len(volumes) == 0:
-            # Fallback tensor if images could not be loaded
-            volume_tensor = torch.zeros((1, self.target_depth, self.target_image_size[0], self.target_image_size[1]), dtype=torch.float32)
+        if self.use_mil_2d:
+            # 2D MIL 3-Channel Fusion mode: returns [Depth, 3, Height, Width]
+            volume_tensor = self.load_multichannel_mil_slices(case_dir)
+            if volume_tensor is None:
+                volume_tensor = torch.zeros((self.target_depth, 3, self.target_image_size[0], self.target_image_size[1]), dtype=torch.float32)
         else:
-            # If multiple sequences, average or stack them. Default: average or take primary sequence
-            volume_tensor = torch.stack(volumes, dim=0).mean(dim=0) # [Depth, Height, Width]
-            volume_tensor = volume_tensor.unsqueeze(0) # [1, Depth, Height, Width]
+            # 3D Volume mode: returns [1, Depth, Height, Width]
+            volumes = []
+            for seq_name in self.sequences:
+                vol = self.load_sequence_slices(case_dir, seq_name)
+                if vol is not None:
+                    # Convert from [0, 1] to [-1, 1]
+                    vol = vol * 2.0 - 1.0
+                    vol = self.pad_or_crop_depth(vol)
+                    volumes.append(vol)
 
-        # Apply medical-safe 3D data augmentation during training
+            if len(volumes) == 0:
+                volume_tensor = torch.zeros((1, self.target_depth, self.target_image_size[0], self.target_image_size[1]), dtype=torch.float32)
+            else:
+                volume_tensor = torch.stack(volumes, dim=0).mean(dim=0) # [Depth, Height, Width]
+                volume_tensor = volume_tensor.unsqueeze(0) # [1, Depth, Height, Width]
+
+        # Apply medical-safe data augmentation during training
         if self.is_train:
             volume_tensor = self.apply_3d_aug(volume_tensor)
 
@@ -180,3 +224,42 @@ class SISMRIDataset(Dataset):
         modality_idx = 0
 
         return volume_tensor, text_str, idx, modality_idx
+
+def sis_collate_fn(batch):
+    """
+    Custom collate function for DataLoader.
+    Dynamically pads slices per batch to max_depth and returns a boolean mask tensor:
+    - padded_images: [Batch, Max_Depth, 3, Height, Width] or [Batch, 1, Depth, H, W]
+    - text_list: List[str]
+    - idxs: Tensor[int]
+    - modality_idxs: Tensor[int]
+    - mask: Tensor[bool] of shape [Batch, Max_Depth] (True for valid slices, False for padded slices)
+    """
+    images = [item[0] for item in batch]
+    texts = [item[1] for item in batch]
+    idxs = [item[2] for item in batch]
+    modality_idxs = [item[3] for item in batch]
+
+    batch_size = len(images)
+
+    if images[0].ndim == 4 and images[0].shape[1] == 3: # 2D MIL mode: [N_i, 3, H, W]
+        max_depth = max([img.shape[0] for img in images])
+        _, C, H, W = images[0].shape
+
+        padded_images = torch.zeros((batch_size, max_depth, C, H, W), dtype=torch.float32)
+        mask = torch.zeros((batch_size, max_depth), dtype=torch.bool)
+
+        for i, img in enumerate(images):
+            curr_depth = img.shape[0]
+            padded_images[i, :curr_depth, :, :, :] = img
+            mask[i, :curr_depth] = True
+    else: # 3D Volume mode: [1, Depth, H, W]
+        padded_images = torch.stack(images, dim=0)
+        _, _, D, H, W = padded_images.shape
+        mask = torch.ones((batch_size, D), dtype=torch.bool)
+
+    idxs = torch.tensor(idxs, dtype=torch.long)
+    modality_idxs = torch.tensor(modality_idxs, dtype=torch.long)
+
+    return padded_images, texts, idxs, modality_idxs, mask
+

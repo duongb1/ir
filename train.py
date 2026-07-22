@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from transformers import get_linear_schedule_with_warmup
 
-from dataset import SISMRIDataset
+from dataset import SISMRIDataset, sis_collate_fn
 from model import build_stage1_model
 from evaluate import evaluate_model
 
@@ -59,7 +59,8 @@ def main():
     # Create output directory
     os.makedirs(config['output_dir'], exist_ok=True)
 
-    # 1. Initialize Full Dataset
+    # 1. Dataset & DataLoader
+    use_mil_2d = config.get('vision_type', 'mil_2d') == 'mil_2d'
     full_dataset = SISMRIDataset(
         report_path=config['report_path'],
         images_dir=config['images_dir'],
@@ -68,13 +69,13 @@ def main():
         sequences=config['sequences'],
         target_image_size=tuple(config['target_image_size']),
         target_depth=config['target_depth'],
+        use_mil_2d=use_mil_2d,
         is_train=True
     )
 
-    # Split into Train / Val / Test sets
     total_len = len(full_dataset)
-    val_len = int(total_len * config.get('val_ratio', 0.15))
-    test_len = int(total_len * config.get('test_ratio', 0.15))
+    val_len = int(total_len * config.get('val_ratio', 0.10))
+    test_len = int(total_len * config.get('test_ratio', 0.20))
     train_len = total_len - val_len - test_len
 
     train_dataset, val_dataset, test_dataset = random_split(
@@ -87,7 +88,7 @@ def main():
     num_workers = config.get('num_workers', 2)
     per_gpu_batch = config['batch_size']
     total_batch_per_step = per_gpu_batch * max(1, num_gpus)
-    grad_accum_steps = config.get('gradient_accumulation_steps', 4)
+    grad_accum_steps = config.get('gradient_accumulation_steps', 2)
 
     print(f"[Train] Per-GPU Batch Size: {per_gpu_batch} | Effective Step Batch Size: {total_batch_per_step} | Grad Accum Steps: {grad_accum_steps} (Effective Total Batch: {total_batch_per_step * grad_accum_steps})")
 
@@ -96,13 +97,15 @@ def main():
         batch_size=total_batch_per_step,
         shuffle=True,
         num_workers=num_workers,
+        collate_fn=sis_collate_fn,
         pin_memory=(device.type == 'cuda')
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=total_batch_per_step,
         shuffle=False,
-        num_workers=num_workers
+        num_workers=num_workers,
+        collate_fn=sis_collate_fn
     )
 
     # 2. Build Model & Tokenizer
@@ -111,6 +114,7 @@ def main():
         dim_text=config['dim_text'],
         dim_image=config['dim_image'],
         dim_latent=config['dim_latent'],
+        vision_type=config.get('vision_type', 'mil_2d'),
         resnet_depth=config.get('resnet_depth', 18),
         image_size=config['image_size'],
         patch_size=config['patch_size'],
@@ -147,7 +151,7 @@ def main():
     print(f"[Train] Differential LRs: Head LR={base_lr}, Backbone LR={backbone_lr}")
 
     total_steps = (len(train_loader) // grad_accum_steps) * config['epochs']
-    warmup_steps = int(total_steps * config.get('warmup_ratio', 0.1))
+    warmup_steps = int(total_steps * config.get('warmup_ratio', 0.15))
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=warmup_steps,
@@ -168,9 +172,10 @@ def main():
         total_loss = 0.0
         optimizer.zero_grad()
 
-        for step, (images, text_list, idxs, modality_idxs) in enumerate(train_loader):
+        for step, (images, text_list, idxs, modality_idxs, mask) in enumerate(train_loader):
             images = images.to(device)
             modal_indices = modality_idxs.to(device)
+            mask = mask.to(device, non_blocking=True)
 
             # Tokenize batch text with PhoBERT
             text_tokens = tokenizer(
@@ -194,6 +199,7 @@ def main():
                     image=images,
                     device=device,
                     gt_similarity_matrix=gt_sim_matrix,
+                    mask=mask,
                     is_condition=False,
                     modal_indexs=modal_indices,
                     modal_embedding=True

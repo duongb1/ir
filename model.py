@@ -13,9 +13,10 @@ def build_stage1_model(
     dim_text=768,
     dim_image=512,
     dim_latent=512,
-    image_size=480,
-    patch_size=20,
-    temporal_patch_size=10,
+    resnet_depth=18,
+    image_size=384,
+    patch_size=16,
+    temporal_patch_size=4,
     spatial_depth=8,
     temporal_depth=6,
     cls_depth=4,
@@ -26,7 +27,7 @@ def build_stage1_model(
     device=None
 ):
     """
-    Builds and initializes the Stage 1 RadIR model using CTViT (Vision) and PhoBERT (Text).
+    Builds and initializes the Stage 1 RadIR model using ResNet3D (Vision) and PhoBERT (Text).
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -36,11 +37,11 @@ def build_stage1_model(
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     text_encoder = AutoModel.from_pretrained(model_name_or_path)
 
-    # 2. Build 3D Vision Encoder (ResNet3D-50)
-    print(f"[Model] Initializing ResNet3D-50 3D Vision Encoder")
+    # 2. Build 3D Vision Encoder (ResNet3D)
+    print(f"[Model] Initializing ResNet3D-{resnet_depth} 3D Vision Encoder")
     image_encoder = ResNet3DEncoder(
         dim=dim_image,
-        depth=50,
+        depth=resnet_depth,
         pretrained=True
     )
 

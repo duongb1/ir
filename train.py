@@ -111,6 +111,7 @@ def main():
         dim_text=config['dim_text'],
         dim_image=config['dim_image'],
         dim_latent=config['dim_latent'],
+        resnet_depth=config.get('resnet_depth', 18),
         image_size=config['image_size'],
         patch_size=config['patch_size'],
         temporal_patch_size=config['temporal_patch_size'],

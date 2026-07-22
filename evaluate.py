@@ -116,6 +116,7 @@ if __name__ == '__main__':
         dim_text=config['dim_text'],
         dim_image=config['dim_image'],
         dim_latent=config['dim_latent'],
+        resnet_depth=config.get('resnet_depth', 18),
         device=device
     )
 

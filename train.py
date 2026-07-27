@@ -116,9 +116,6 @@ def main():
         dim_latent=config['dim_latent'],
         vision_type=config.get('vision_type', 'mil_2d'),
         resnet_depth=config.get('resnet_depth', 18),
-        image_size=config['image_size'],
-        patch_size=config['patch_size'],
-        temporal_patch_size=config['temporal_patch_size'],
         use_triplet_loss=config['use_triplet_loss'],
         use_infoNCE_loss=config['use_infoNCE_loss'],
         device=device

@@ -160,13 +160,13 @@ class RADIR(nn.Module):
         self.use_uncon_triplet_loss = use_uncon_triplet_loss
         self.use_uncon_infoNCE_loss = use_uncon_infoNCE_loss
         
-        # Memory Bank (MoCo-like)
-        self.queue_size = 1024
-        self.register_buffer("text_queue", torch.randn(dim_latent, self.queue_size))
-        self.register_buffer("image_queue", torch.randn(dim_latent, self.queue_size))
-        self.text_queue = nn.functional.normalize(self.text_queue, dim=0)
-        self.image_queue = nn.functional.normalize(self.image_queue, dim=0)
-        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+        # Memory Bank (MoCo-like) - VÔ HIỆU HÓA ĐỂ GIẢI PHÓNG VRAM & DÙNG HYBRID GT MATRIX
+        # self.queue_size = 1024
+        # self.register_buffer("text_queue", torch.randn(dim_latent, self.queue_size))
+        # self.register_buffer("image_queue", torch.randn(dim_latent, self.queue_size))
+        # self.text_queue = nn.functional.normalize(self.text_queue, dim=0)
+        # self.image_queue = nn.functional.normalize(self.image_queue, dim=0)
+        # self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
         
         #assert use_all_token_embeds or (visual_has_cls_token or text_has_cls_token), 'CLS token must be included on both vision and text transformers if you are not using fine-grained contrastive learning loss'
         self.dtype=torch.float32
@@ -704,52 +704,19 @@ class RADIR(nn.Module):
             if image_latents.ndim > 2:
                 image_latents = image_latents.reshape(-1, image_latents.shape[-1])
                 
-            if self.training:
-                text_to_image = torch.matmul(text_latents, torch.cat([image_latents.T, self.image_queue.clone().detach()], dim=1)) * temp
-                image_to_text = torch.matmul(image_latents, torch.cat([text_latents.T, self.text_queue.clone().detach()], dim=1)) * temp
-                
-                if self.use_image2image_loss:
-                    image_to_image = torch.matmul(image_latents, torch.cat([image_latents.T, self.image_queue.clone().detach()], dim=1)) * temp
+            # Vô hiệu hóa Queue (Memory Bank) cho Training, tính Logit thuần túy In-batch [B, B]
+            text_to_image = torch.matmul(text_latents, image_latents.T) * temp
+            image_to_text = text_to_image.T
+            
+            if self.use_image2image_loss:
+                image_to_image = torch.matmul(image_latents, image_latents.T) * temp
 
-                B = text_to_image.shape[0]
-                K = self.queue_size
-                if gt_similarity_matrix is None:
-                    gt_similarity_matrix = torch.eye(B, device=text_to_image.device)
-                
-                # Expand gt_similarity_matrix for the queue (queue elements are all negative, i.e., 0)
-                expanded_gt = torch.zeros((B, B + K), device=gt_similarity_matrix.device)
-                expanded_gt[:, :B] = gt_similarity_matrix
-                gt_similarity_matrix = expanded_gt
-                
-                # Enqueue and dequeue
-                ptr = int(self.queue_ptr)
-                if ptr + B <= K:
-                    self.text_queue[:, ptr:ptr + B] = text_latents.T.detach()
-                    self.image_queue[:, ptr:ptr + B] = image_latents.T.detach()
-                    ptr = (ptr + B) % K
-                else:
-                    rem = K - ptr
-                    self.text_queue[:, ptr:K] = text_latents[:rem].T.detach()
-                    self.image_queue[:, ptr:K] = image_latents[:rem].T.detach()
-                    rem2 = B - rem
-                    self.text_queue[:, :rem2] = text_latents[rem:].T.detach()
-                    self.image_queue[:, :rem2] = image_latents[rem:].T.detach()
-                    ptr = rem2
-                self.queue_ptr[0] = ptr
-
+            B = text_to_image.shape[0]
+            if gt_similarity_matrix is None:
+                gt_similarity_matrix = torch.eye(B, device=text_to_image.device)
             else:
-                text_to_image = torch.matmul(text_latents, image_latents.T) * temp
-                image_to_text = text_to_image.T
-                
-                if self.use_image2image_loss:
-                    image_to_image = torch.matmul(image_latents, image_latents.T) * temp
-
-                B = text_to_image.shape[0]
-                if gt_similarity_matrix is None:
-                    gt_similarity_matrix = torch.eye(B, device=text_to_image.device)
-                else:
-                    if gt_similarity_matrix.ndim > 2:
-                        gt_similarity_matrix = gt_similarity_matrix.reshape(B, B)
+                if gt_similarity_matrix.ndim > 2:
+                    gt_similarity_matrix = gt_similarity_matrix.reshape(B, B)
 
             if not (self.use_uncon_infoNCE_loss > 0 or self.use_uncon_triplet_loss > 0 or self.use_image2image_loss > 0):
                 raise ValueError("To Calculate Loss, use_triplet_loss and use_infoNCE_loss and use_image2image_loss cannot all be False")

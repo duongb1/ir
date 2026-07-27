@@ -174,7 +174,7 @@ def main():
             modal_indices = modality_idxs.to(device)
             mask = mask.to(device, non_blocking=True)
 
-            # Tokenize batch text with PhoBERT
+            # Tokenize batch text
             text_tokens = tokenizer(
                 list(text_list),
                 return_tensors="pt",
@@ -183,11 +183,25 @@ def main():
                 max_length=512
             ).to(device)
 
-            # Compute ground-truth text-to-text similarity matrix (T) using PhoBERT embeddings
+            # --- HYBRID GROUND-TRUTH SIMILARITY MATRIX ---
+            # 1. Soft Thresholding từ ViHealthBERT (Giữ lại đặc điểm ngữ nghĩa của các ca bệnh)
             with torch.no_grad():
                 text_embs = raw_model.text_transformer(text_tokens.input_ids, attention_mask=text_tokens.attention_mask)[0][:, 0, :]
                 text_embs = torch.nn.functional.normalize(text_embs.float(), dim=-1)
-                gt_sim_matrix = torch.matmul(text_embs, text_embs.T)
+                bert_sim = torch.matmul(text_embs, text_embs.T)
+                
+                # Áp dụng ngưỡng cắt mềm (Ngưỡng 0.90): Khác bệnh lý sẽ bị ép về 0.0
+                threshold = 0.90
+                soft_sim = torch.where(bert_sim > threshold, bert_sim, torch.zeros_like(bert_sim))
+
+            # 2. Khớp chuỗi tuyệt đối (Bảo vệ tuyệt đối các ca có text giống hệt nhau, ví dụ: "Âm tính")
+            import numpy as np # Import locally in case it's missing at top
+            texts_np = np.array(text_list)
+            exact_match = torch.tensor((texts_np[:, None] == texts_np[None, :]), dtype=torch.float32, device=device)
+
+            # 3. Gộp ma trận: Lấy giá trị tối đa giữa 2 phương pháp
+            gt_sim_matrix = torch.max(exact_match, soft_sim)
+            # ---------------------------------------------
 
             # Forward pass with PyTorch 2.x torch.amp.autocast
             with torch.amp.autocast('cuda', enabled=use_amp):

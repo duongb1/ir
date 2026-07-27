@@ -19,7 +19,7 @@ seed: 42
 num_workers: 2
 
 # Model parameters
-text_model_name: "vinai/phobert-base"
+text_model_name: "demdecuong/vihealthbert-base-word"
 freeze_text_encoder: true           # Freeze PhoBERT encoder weights to save VRAM
 vision_type: "mil_2d"               # Vision encoder: "mil_2d" (2D ABMIL + Lesion Map) or "resnet3d"
 dim_text: 768

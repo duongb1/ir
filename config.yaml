@@ -34,7 +34,7 @@ temporal_patch_size: 4
 batch_size: 16                     # Single GPU batch size (16x256x256 image takes ~9.5GB VRAM)
 gradient_accumulation_steps: 1     # Effective batch size = 16 x 1 = 16
 use_amp: true                      # Automatic Mixed Precision (FP16)
-epochs: 20
+epochs: 40
 lr: 0.0001                          # Projection heads learning rate
 backbone_lr: 0.00001                # Differential LR for pre-trained backbones (1e-5)
 weight_decay: 0.01

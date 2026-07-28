@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from torch.utils.data import DataLoader
 from dataset import SISMRIDataset, sis_collate_fn
+from dataset_hisbreast import HiSBreastDataset
 from model import build_stage1_model
 
 def compute_retrieval_metrics(image_embeds, text_embeds, gt_matrix, k_values=(1, 5, 10)):
@@ -126,25 +127,43 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, default='config.yaml')
+    parser.add_argument('--dataset_type', type=str, default='sismri', choices=['sismri', 'hisbreast'], help='Type of dataset to evaluate on')
+    parser.add_argument('--report_path', type=str, default=None, help='Override report_path')
+    parser.add_argument('--images_dir', type=str, default=None, help='Override images_dir')
     parser.add_argument('--checkpoint', type=str, required=False, help='Path to model checkpoint (.pt)')
     args = parser.parse_args()
 
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
+    # Apply overrides if provided
+    if args.report_path: config['report_path'] = args.report_path
+    if args.images_dir: config['images_dir'] = args.images_dir
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Build dataset & loader
-    dataset = SISMRIDataset(
-        report_path=config['report_path'],
-        images_dir=config['images_dir'],
-        text_column=config['text_column'],
-        id_column=config['id_column'],
-        sequences=config['sequences'],
-        target_image_size=tuple(config['target_image_size']),
-        target_depth=config['target_depth'],
-        is_train=False
-    )
+    if args.dataset_type == "hisbreast":
+        print("[Evaluate] Initializing HiSBreast Dataset Mode")
+        dataset = HiSBreastDataset(
+            report_path=config['report_path'],
+            images_dir=config['images_dir'],
+            target_image_size=tuple(config['target_image_size']),
+            is_train=False,
+            need_aug=False
+        )
+    else:
+        print("[Evaluate] Initializing S.I.S MRI Dataset Mode")
+        dataset = SISMRIDataset(
+            report_path=config['report_path'],
+            images_dir=config['images_dir'],
+            text_column=config['text_column'],
+            id_column=config['id_column'],
+            sequences=config['sequences'],
+            target_image_size=tuple(config['target_image_size']),
+            target_depth=config['target_depth'],
+            is_train=False
+        )
     
     # Sử dụng custom collate_fn để tương thích với mask của kiến trúc 2D MIL
     dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config.get('num_workers', 4), collate_fn=sis_collate_fn)

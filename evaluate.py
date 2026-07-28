@@ -7,21 +7,16 @@ from torch.utils.data import DataLoader
 from dataset import SISMRIDataset, sis_collate_fn
 from model import build_stage1_model
 
-def compute_retrieval_metrics(image_embeds, text_embeds, all_texts, k_values=(1, 5, 10)):
+def compute_retrieval_metrics(image_embeds, text_embeds, gt_matrix, k_values=(1, 5, 10)):
     """
     Computes Recall@K metrics for Text-to-Image (T2I) and Image-to-Text (I2T) retrieval.
-    Includes Multi-Ground-Truth (Multi-GT) support to handle duplicate text reports.
+    Uses pre-computed Hybrid Ground-Truth matrix.
     """
     # Calculate similarity matrix: [N, N]
     sim_matrix = torch.matmul(image_embeds, text_embeds.T)
     N = sim_matrix.shape[0]
 
-    # --- TẠO MA TRẬN MULTI-GROUND-TRUTH ---
-    # Sử dụng numpy broadcasting để so sánh chuỗi cực nhanh
-    texts_np = np.array(all_texts)
-    # gt_matrix[i, j] = True nếu text của bệnh nhân i giống hệt text bệnh nhân j
-    gt_matrix_np = (texts_np[:, None] == texts_np[None, :])
-    gt_matrix = torch.tensor(gt_matrix_np, device=sim_matrix.device)
+    # Sử dụng Hybrid GT Matrix truyền vào
 
     # 1. Text-to-Image Retrieval (Query: Text, Target: Image)
     t2i_sim = sim_matrix.T  # [N_text, N_image]
@@ -55,6 +50,7 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
     model.eval()
     all_image_embeds = []
     all_text_embeds = []
+    all_text_embs_raw = [] # Lưu raw text embedding cho Hybrid GT
     all_texts = [] # Khởi tạo danh sách lưu trữ text gốc
 
     for step, batch in enumerate(dataloader):
@@ -71,7 +67,7 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
         # Lưu lại text gốc của batch hiện tại để xây dựng GT Matrix
         all_texts.extend(text_list)
 
-        # Tokenize text using PhoBERT tokenizer
+        # Tokenize text using ViHealthBERT tokenizer
         text_tokens = tokenizer(
             list(text_list),
             return_tensors="pt",
@@ -82,6 +78,11 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
 
         # Forward pass through RADIR with AMP context
         with torch.amp.autocast('cuda', enabled=(use_amp and device.type == 'cuda')):
+            # Trích xuất raw text embedding cho Hybrid GT Matrix
+            with torch.no_grad():
+                text_embs_raw = model.text_transformer(text_tokens.input_ids, attention_mask=text_tokens.attention_mask)[0][:, 0, :]
+                text_embs_raw = torch.nn.functional.normalize(text_embs_raw.float(), dim=-1)
+
             text_emb, image_emb, _, _ = model(
                 text_tokens,
                 image=images,
@@ -99,12 +100,25 @@ def evaluate_model(model, dataloader, tokenizer, device, use_amp=True):
 
         all_image_embeds.append(image_emb.cpu())
         all_text_embeds.append(text_emb.cpu())
+        all_text_embs_raw.append(text_embs_raw.cpu())
 
-    image_embeds = torch.cat(all_image_embeds, dim=0)
-    text_embeds = torch.cat(all_text_embeds, dim=0)
+    image_embeds = torch.cat(all_image_embeds, dim=0).to(device)
+    text_embeds = torch.cat(all_text_embeds, dim=0).to(device)
+    text_embs_raw = torch.cat(all_text_embs_raw, dim=0).to(device)
 
-    # Truyền thêm all_texts vào hàm tính toán độ đo
-    t2i_recalls, i2t_recalls = compute_retrieval_metrics(image_embeds, text_embeds, all_texts, k_values=(1, 5, 10))
+    # --- TẠO MA TRẬN HYBRID MULTI-GROUND-TRUTH ---
+    print(f"[Evaluate] Computing Hybrid Ground-Truth Matrix for {len(all_texts)} samples...")
+    # 1. Soft Thresholding (ViHealthBERT)
+    bert_sim = torch.matmul(text_embs_raw, text_embs_raw.T)
+    soft_sim = torch.where(bert_sim > 0.90, torch.ones_like(bert_sim), torch.zeros_like(bert_sim))
+    # 2. Exact String Match
+    texts_np = np.array(all_texts)
+    exact_match = torch.tensor((texts_np[:, None] == texts_np[None, :]), dtype=torch.float32, device=device)
+    # 3. Combine
+    gt_matrix = torch.max(exact_match, soft_sim).bool()
+
+    # Tính toán độ đo
+    t2i_recalls, i2t_recalls = compute_retrieval_metrics(image_embeds, text_embeds, gt_matrix, k_values=(1, 5, 10))
 
     return t2i_recalls, i2t_recalls
 
@@ -141,9 +155,8 @@ if __name__ == '__main__':
         dim_text=config['dim_text'],
         dim_image=config['dim_image'],
         dim_latent=config['dim_latent'],
-        resnet_depth=config.get('resnet_depth', 50), # Điều chỉnh theo 2D Backbone (18/50)
-        device=device,
-        vision_type=config.get('vision_type', 'resnet3d') # Dự phòng cho bản cập nhật mới
+        resnet_depth=config.get('resnet_depth', 18),
+        device=device
     )
 
     if args.checkpoint and os.path.exists(args.checkpoint):

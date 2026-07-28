@@ -43,7 +43,13 @@ class HiSBreastDataset(Dataset):
                 img_path = os.path.join(self.images_dir, file_name)
                 if os.path.exists(img_path):
                     self.samples.append((file_name, text, img_path))
+                elif len(self.samples) == 0:
+                    first_missing_path = img_path # Lưu lại path đầu tiên bị lỗi để in ra
 
+        if len(self.samples) == 0:
+            print(f"[HiSBreastDataset] CẢNH BÁO MẠNH: Không tìm thấy ảnh nào! Đã kiểm tra thử đường dẫn: {first_missing_path}")
+            print(f"[HiSBreastDataset] Vui lòng kiểm tra lại thư mục images trên Kaggle có thể bị lồng nhau (vd: images/images/...)")
+        
         print(f"[HiSBreastDataset] Loaded {len(self.samples)} valid samples from {report_path}")
 
         # Data Augmentation & Transforms

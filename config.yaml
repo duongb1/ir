@@ -45,6 +45,6 @@ max_grad_norm: 1.0
 
 # Loss parameters
 use_triplet_loss: 1.0
-use_infoNCE_loss: 1.0
-triplet_loss_margin: 0.1            # Mild initial margin to prevent gradient shock
+use_infoNCE_loss: 0.0
+triplet_loss_margin: 0.2            # Mild initial margin to prevent gradient shock
 temperature: 0.07

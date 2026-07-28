@@ -41,14 +41,7 @@ class HiSBreastDataset(Dataset):
             
             if file_name and text and text.lower() != 'nan':
                 img_path = os.path.join(self.images_dir, file_name)
-                if os.path.exists(img_path):
-                    self.samples.append((file_name, text, img_path))
-                elif len(self.samples) == 0:
-                    first_missing_path = img_path # Lưu lại path đầu tiên bị lỗi để in ra
-
-        if len(self.samples) == 0:
-            print(f"[HiSBreastDataset] CẢNH BÁO MẠNH: Không tìm thấy ảnh nào! Đã kiểm tra thử đường dẫn: {first_missing_path}")
-            print(f"[HiSBreastDataset] Vui lòng kiểm tra lại thư mục images trên Kaggle có thể bị lồng nhau (vd: images/images/...)")
+                self.samples.append((file_name, text, img_path))
         
         print(f"[HiSBreastDataset] Loaded {len(self.samples)} valid samples from {report_path}")
 
@@ -75,22 +68,19 @@ class HiSBreastDataset(Dataset):
     def __getitem__(self, idx):
         file_name, text_str, img_path = self.samples[idx]
 
-        try:
-            # 1. Mở ảnh và chuyển sang hệ màu RGB (để có 3 kênh tương thích ResNet)
-            img = Image.open(img_path).convert('RGB')
-            
-            # 2. Áp dụng transforms (Resize -> ToTensor [0,1] -> Normalize [-1,1])
-            # Đầu ra img_tensor có shape: [3, H, W]
-            img_tensor = self.transform(img)
-            
-            # 3. Tương thích với `sis_collate_fn` của kiến trúc 2D MIL
-            # Kiến trúc mong đợi [Depth, C, H, W]. Với ảnh 2D, Depth = 1.
-            img_tensor = img_tensor.unsqueeze(0) # Trở thành [1, 3, H, W]
-            
-        except Exception as e:
-            print(f"Lỗi khi tải ảnh {img_path}: {e}")
-            # Trả về tensor rỗng nếu ảnh bị hỏng
-            img_tensor = torch.zeros((1, 3, self.target_image_size[0], self.target_image_size[1]))
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"KHÔNG TÌM THẤY ẢNH: {img_path}\nVui lòng kiểm tra lại cấu trúc thư mục (có thể bị lồng images/images/) hoặc đuôi file (.png hay .jpg).")
+
+        # 1. Mở ảnh và chuyển sang hệ màu RGB (để có 3 kênh tương thích ResNet)
+        img = Image.open(img_path).convert('RGB')
+        
+        # 2. Áp dụng transforms (Resize -> ToTensor [0,1] -> Normalize [-1,1])
+        # Đầu ra img_tensor có shape: [3, H, W]
+        img_tensor = self.transform(img)
+        
+        # 3. Tương thích với `sis_collate_fn` của kiến trúc 2D MIL
+        # Kiến trúc mong đợi [Depth, C, H, W]. Với ảnh 2D, Depth = 1.
+        img_tensor = img_tensor.unsqueeze(0) # Trở thành [1, 3, H, W]
 
         # Chuẩn hóa chuỗi văn bản
         text_str = str(text_str).strip()

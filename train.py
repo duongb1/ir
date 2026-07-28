@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, random_split
 from transformers import get_linear_schedule_with_warmup
 
 from dataset import SISMRIDataset, sis_collate_fn
+from dataset_hisbreast import HiSBreastDataset
 from model import build_stage1_model
 from evaluate import evaluate_model
 
@@ -25,6 +26,7 @@ def set_seed(seed):
 def main():
     parser = argparse.ArgumentParser(description="Train Stage 1 RadIR model on S.I.S dataset (Kaggle 2x T4 Optimized)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
+    parser.add_argument("--dataset_type", type=str, default="sismri", choices=["sismri", "hisbreast"], help="Type of dataset to train on")
     parser.add_argument("--report_path", type=str, default=None, help="Override report_path")
     parser.add_argument("--images_dir", type=str, default=None, help="Override images_dir")
     parser.add_argument("--output_dir", type=str, default=None, help="Override output_dir")
@@ -60,18 +62,29 @@ def main():
     os.makedirs(config['output_dir'], exist_ok=True)
 
     # 1. Dataset & DataLoader
-    use_mil_2d = config.get('vision_type', 'mil_2d') == 'mil_2d'
-    full_dataset = SISMRIDataset(
-        report_path=config['report_path'],
-        images_dir=config['images_dir'],
-        text_column=config['text_column'],
-        id_column=config['id_column'],
-        sequences=config['sequences'],
-        target_image_size=tuple(config['target_image_size']),
-        target_depth=config['target_depth'],
-        use_mil_2d=use_mil_2d,
-        is_train=True
-    )
+    if args.dataset_type == "hisbreast":
+        print("[Train] Initializing HiSBreast Dataset Mode")
+        full_dataset = HiSBreastDataset(
+            report_path=config['report_path'],
+            images_dir=config['images_dir'],
+            target_image_size=tuple(config['target_image_size']),
+            is_train=True,
+            need_aug=True # Bật augment cơ bản cho 2D
+        )
+    else:
+        print("[Train] Initializing S.I.S MRI Dataset Mode")
+        use_mil_2d = config.get('vision_type', 'mil_2d') == 'mil_2d'
+        full_dataset = SISMRIDataset(
+            report_path=config['report_path'],
+            images_dir=config['images_dir'],
+            text_column=config['text_column'],
+            id_column=config['id_column'],
+            sequences=config['sequences'],
+            target_image_size=tuple(config['target_image_size']),
+            target_depth=config['target_depth'],
+            use_mil_2d=use_mil_2d,
+            is_train=True
+        )
 
     total_len = len(full_dataset)
     val_len = int(total_len * config.get('val_ratio', 0.10))

@@ -39,8 +39,8 @@ class VisionMIL(nn.Module):
         x: [B, N, C, H, W] tensor (N = number of 2D slices, C = 3 channels: ADC, DWI, DWI-ADC)
         mask: [B, N] boolean tensor (True for valid slices, False for padded slices)
         """
-        # Handle [B, C, N, H, W] shape if passed
-        if x.ndim == 5 and x.shape[1] in [1, 3]:
+        # Handle [B, C, N, H, W] shape if passed (e.g., from 3D CNN pipeline)
+        if x.ndim == 5 and x.shape[1] in [1, 3] and x.shape[2] not in [1, 3]:
             x = x.permute(0, 2, 1, 3, 4)
 
         B, N, C, H, W = x.shape
